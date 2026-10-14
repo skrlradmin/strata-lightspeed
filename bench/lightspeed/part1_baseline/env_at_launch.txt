@@ -1,0 +1,11 @@
+DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+HOME=/home/dutch
+OLDPWD=/home/dutch
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+PWD=/home/dutch/ai/bench/strata_baseline
+SHELL=/bin/bash
+SHLVL=1
+SSH_CLIENT=100.75.1.122 42312 22
+SSH_CONNECTION=100.75.1.122 42312 100.114.54.35 22
+USER=dutch
+_=/usr/bin/env

@@ -1,0 +1,1 @@
+Write a detailed technical essay of at least 1500 words explaining how a modern CPU executes instructions: cover the fetch/decode pipeline, branch prediction, out-of-order execution, register renaming, the cache hierarchy, and memory ordering. Use section headings and concrete examples.

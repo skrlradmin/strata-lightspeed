@@ -1,0 +1,25 @@
+a0116b2782a5b82622358c04a06496485d12b2d6
+On branch main
+Your branch is up to date with 'origin/main'.
+
+nothing to commit, working tree clean
+Linux harpy 7.0.0-38-generic #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 26.04.1 LTS"
+NAME="Ubuntu"
+VERSION_ID="26.04"
+VERSION="26.04.1 LTS (Resolute Raccoon)"
+VERSION_CODENAME=resolute
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=resolute
+LOGO=ubuntu-logo
+Wed Oct 14 10:50:52 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 595.99.02              Driver Version: 595.99.02      CUDA Version: 13.2     |
++-----------------------------------------+------------------------+----------------------+
+/bin/bash: line 3: nvcc: command not found
+gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0

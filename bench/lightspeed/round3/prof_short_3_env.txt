@@ -1,0 +1,1 @@
+prof_short_3 cfg=A prompt=prompt.txt env: STRATA_DECODE_TIMING=1 STRATA_PREFILL_TIMING=1 STRATA_VERIFY_PROFILE=1

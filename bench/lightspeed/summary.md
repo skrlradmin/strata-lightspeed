@@ -16,3 +16,9 @@ All 18 outputs are identical (sha256 c3c4d308b4...). Drafts accepted 284-285 of 
 No bytes-moved figure exists for the CPU pool. Strata reports CPU-pool ms/window, CPU expert entries per layer-window and the count of experts read over PCIe (in results.csv and the decode timing lines).
 Swap: 4422 MiB used before, 1932 MiB after.
 Per-run details: results.csv. Raw logs: *_engine.log, *_server_stdout.log. Monitoring: dmon.log, vmstat.log, mpstat.log. Earlier baseline: part1_baseline/.
+
+## Note on comparability
+
+The 199-207 tok/s decode numbers from the first baseline (part1_baseline) and round 3 came from a warm server that reused cached prompt tokens. The ~180 tok/s numbers in round 2 came from a freshly restarted, fully cold server. The two methods aren't comparable, and the gap is not a regression. Byte-identical greedy output only holds on cold, freshly restarted runs.
+
+Round 3 (round3/summary.md): the verify profile shows GPU compute dominates each window (GDN/mixer plus hyper-connections are ~55% of GPU time), while PCIe experts and CPU waits together are ~0.5 ms. Adaptive overlap (STRATA_ADAPT_OVERLAP=1 + STRATA_ADAPT_OVERLAP_RESIDENT=1) showed no statistically significant gain, so it stays experimental.

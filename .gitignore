@@ -61,3 +61,6 @@ build-vision-cuda12.bat
 
 /.ccache/
 /.rocm-win/
+
+# Keep raw benchmark logs
+!bench/lightspeed/**/*.log

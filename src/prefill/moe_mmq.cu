@@ -29,6 +29,22 @@ __global__ void copy16_kernel(const uint4* __restrict__ a, int64_t na, const uin
     else if (i < na + nb) ab_dst[i] = b[i - na];
     else if (i < na + nb + nc) c_dst[i - na - nb] = c[i - na - nb];
 }
+// copy16_kernel for an MMQ group: blockIdx.y is the expert (first + y)
+struct GroupArgs {
+    const uint8_t* blob[kGatherGroupMax];
+    int64_t up_off, down_off, gu_stride, d_stride;   // in uint4
+};
+__global__ void copy16_group_kernel(GroupArgs ga, int first, int64_t na, int64_t nc, uint4* __restrict__ gu_dst,
+                                    uint4* __restrict__ d_dst) {
+    const int q = first + (int) blockIdx.y;
+    const uint4* src = (const uint4*) ga.blob[q];
+    uint4* ab = gu_dst + (int64_t) q * ga.gu_stride;
+    uint4* cd = d_dst + (int64_t) q * ga.d_stride;
+    const int64_t i = (int64_t) blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < na) ab[i] = src[i];
+    else if (i < 2 * na) ab[i] = src[ga.up_off + (i - na)];
+    else if (i < 2 * na + nc) cd[i - 2 * na] = src[ga.down_off + (i - 2 * na)];
+}
 __global__ void copy1_kernel(const uint8_t* __restrict__ a, int64_t na, const uint8_t* __restrict__ b, int64_t nb,
                              uint8_t* __restrict__ ab_dst, const uint8_t* __restrict__ c, int64_t nc, uint8_t* __restrict__ c_dst) {
     const int64_t i = (int64_t) blockIdx.x * blockDim.x + threadIdx.x;
@@ -83,6 +99,19 @@ __global__ void iota_kernel(int32_t* dst, int64_t n) {
     if (i < n) dst[i] = (int32_t) i;
 }
 
+#if defined(__HIPCC__)   // #820: only the HIP dense-MMQ path (Gemm::native_mmq) uses these two
+__global__ void f16_to_f32_kernel(const uint16_t* __restrict__ x, float* __restrict__ y, int64_t n) {
+    const int64_t i = (int64_t) blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) y[i] = __half2float(__ushort_as_half(x[i]));
+}
+
+__global__ void set_bounds_kernel(int32_t* d, int32_t rows) {
+    d[0] = 0;
+    d[1] = rows;
+}
+
+#endif
+
 unsigned blocks(int64_t n) { return (unsigned) ((n + 255) / 256); }
 
 }  // namespace
@@ -100,6 +129,9 @@ bool supported(int t) {
         case GGML_TYPE_Q8_0:   // the draft layer's dense matrices (E-9)
 #ifdef STRATA_MMQ_KQUANTS
         case GGML_TYPE_Q4_K: case GGML_TYPE_Q5_K: case GGML_TYPE_Q5_1:   // Unsloth's UD-Q4_K_XL experts (CUDA)
+#if defined(__HIPCC__) || defined(STRATA_Q6K_EXPERTS)
+        case GGML_TYPE_Q6_K:   // HIP: the dense GGUF projections (STRATA_DENSE_MMQ); CUDA: only the opt-in -DSTRATA_Q6K_EXPERTS=ON build
+#endif
 #endif
             return true;
         default:
@@ -184,6 +216,9 @@ void Context::run(const Product& p, void* stream) {
 #ifdef STRATA_MMQ_KQUANTS
         case GGML_TYPE_Q4_K: mul_mat_q_case<GGML_TYPE_Q4_K>(ctx, a, s); break;
         case GGML_TYPE_Q5_K: mul_mat_q_case<GGML_TYPE_Q5_K>(ctx, a, s); break;
+#if defined(__HIPCC__) || defined(STRATA_Q6K_EXPERTS)
+        case GGML_TYPE_Q6_K: mul_mat_q_case<GGML_TYPE_Q6_K>(ctx, a, s); break;
+#endif
         case GGML_TYPE_Q5_1: mul_mat_q_case<GGML_TYPE_Q5_1>(ctx, a, s); break;
 #endif
         default:
@@ -210,6 +245,25 @@ void gather_native(const void* gate, const void* up, size_t gu_half_bytes, const
     ck(cudaGetLastError(), "gather_native");
 }
 
+bool gather_native_group(const GatherGroup& g, size_t up_off, size_t gu_half_bytes, size_t down_off, size_t d_bytes,
+                         void* gu_dst, size_t gu_stride, void* d_dst, size_t d_stride, void* stream) {
+    if (g.first < 0 || g.n <= g.first || g.n > kGatherGroupMax) return false;
+    uintptr_t a = (uintptr_t) gu_dst | (uintptr_t) d_dst | up_off | gu_half_bytes | down_off | d_bytes | gu_stride | d_stride;
+    for (int q = g.first; q < g.n; ++q) a |= (uintptr_t) g.blob[q];
+    if (a % 16 != 0) return false;
+    GroupArgs ga{};
+    for (int q = g.first; q < g.n; ++q) ga.blob[q] = g.blob[q];
+    ga.up_off = (int64_t) up_off / 16;
+    ga.down_off = (int64_t) down_off / 16;
+    ga.gu_stride = (int64_t) gu_stride / 16;
+    ga.d_stride = (int64_t) d_stride / 16;
+    const int64_t na = (int64_t) gu_half_bytes / 16, nc = (int64_t) d_bytes / 16;
+    copy16_group_kernel<<<dim3(blocks(2 * na + nc), (unsigned) (g.n - g.first)), 256, 0, (cudaStream_t) stream>>>(
+        ga, g.first, na, nc, (uint4*) gu_dst, (uint4*) d_dst);
+    ck(cudaGetLastError(), "gather_native_group");
+    return true;
+}
+
 void gather_strata_q2(const uint8_t* blob, void* gu_dst, void* d_dst, void* stream) {
     strata_q2_kernel<<<blocks(1280LL * 40 + 2560LL * 10), 256, 0, (cudaStream_t) stream>>>(blob, (uint16_t*) gu_dst,
                                                                                          (uint16_t*) d_dst);
@@ -227,5 +281,18 @@ void iota(int32_t* dst, int64_t n, void* stream) {
     iota_kernel<<<blocks(n), 256, 0, (cudaStream_t) stream>>>(dst, n);
     ck(cudaGetLastError(), "iota");
 }
+
+#if defined(__HIPCC__)
+void f16_to_f32(const uint16_t* x, float* y, int64_t n, void* stream) {
+    if (n <= 0) return;
+    f16_to_f32_kernel<<<blocks(n), 256, 0, (cudaStream_t) stream>>>(x, y, n);
+    ck(cudaGetLastError(), "f16_to_f32");
+}
+
+void set_bounds(int32_t* dst, int32_t rows, void* stream) {
+    set_bounds_kernel<<<1, 1, 0, (cudaStream_t) stream>>>(dst, rows);
+    ck(cudaGetLastError(), "set_bounds");
+}
+#endif
 
 }  // namespace strata::prefill::mmq
